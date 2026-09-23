@@ -21,8 +21,9 @@ Proton Experimental, RTX 4070 Ti.
 | Tomb Raider I–III Remastered | OpenGL (64-bit) + Feeder | ❌ `D3D12 fence -> GL semaphore import: FAILED` |
 | FINAL FANTASY VIII Remastered | OpenGL (32-bit) + Feeder | ❌ same failure, cross-process |
 
-**Conclusion: DLSS 5 works on Linux for Direct3D games, and is blocked for OpenGL games**
-by one missing Wine feature — importing a D3D12 fence handle as a GL semaphore.
+**Conclusion: DLSS 5 works on Linux for Direct3D games, and is blocked for OpenGL games.**
+Confirmed with upstream: Wine cannot import a D3D12 fence *or* resource handle into GL
+(`GL_INVALID_ENUM` on both), so there is no fallback to build. Details below.
 
 ---
 
@@ -118,20 +119,35 @@ ngx-probe: hooked 5 NGX exports on _nvngx.dll
 
 ## The blockers
 
-### OpenGL ↔ D3D12 fence interop (fatal, Wine-level)
+### OpenGL under Proton — settled: not possible via DLSS5-Feeder
 
 ```
 [feed32] D3D12 fence -> GL semaphore import: in=FAILED out=FAILED
 stopped: cross-process fence import failed
 ```
 
-Single GPU; the helper logs the same adapter LUID as the game, so it is not the Feeder's
-multi-GPU case. Wine does not appear to implement `GL_HANDLE_TYPE_D3D12_FENCE_EXT` import.
-`host_creates=0` does not reverse the direction. Failed identically in two structurally
-different setups (64-bit in-process, 32-bit cross-process).
+Everything *else* in the FF8R chain works: depth and motion vectors resolve, IPC v9 connects,
+`feature ready: 1920x1080 DLAA`, 4 shared D3D12 textures hand over. Only the fence won't cross.
 
-Everything *else* in the FF8R chain worked: depth and motion vectors resolved, IPC v9 connected,
-`feature ready: 1920x1080 DLAA`, 4 shared D3D12 textures handed over.
+**Confirmed dead end.** The Feeder's maintainer added a `memory-import probe` in **1.16.0-beta.7**
+specifically to settle whether a CPU-synchronised fallback was possible. Retested there:
+
+```
+the fence import failed at glImportSemaphoreWin32HandleEXT(D3D12_FENCE), GL error 0x0500
+running under Wine 11.0: it advertises GL_EXT_semaphore_win32 / GL_EXT_memory_object_win32 whatever
+  the host's GL driver can do with a Win32 handle, so the extension gate cannot see this
+memory-import probe: slot 0..3 does NOT import into GL either
+  (failed at glImportMemoryWin32HandleEXT(D3D12_RESOURCE), GL error 0x0500)
+```
+
+`0x0500` is `GL_INVALID_ENUM`, identical for both calls — the Win32 handle **type** is rejected
+outright. The native Linux NVIDIA driver implements only the fd-based `GL_EXT_memory_object_fd` /
+`GL_EXT_semaphore_fd`; Wine advertises the `_win32` variants regardless, which is why the extension
+gate cannot detect this. With neither fence nor textures crossing into GL there is nothing for a
+CPU-sync fallback to synchronise, so that approach is off the table.
+
+Remaining theoretical routes: a staging copy, or **Zink** (GL→Vulkan) in front of the game.
+See [issue #121](https://github.com/jlrouzies-fr/DLSS5-Feeder/issues/121).
 
 ### Depth in emulators
 
