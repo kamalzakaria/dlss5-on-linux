@@ -18,12 +18,15 @@ Proton Experimental, RTX 4070 Ti.
 | FINAL FANTASY VII REBIRTH | D3D12, native DLSS | ✅ works — 45,000+ evaluates, 22–29 fps @ 5120×1440 |
 | DuckStation (PS1 emulator) | **D3D11** + DLSS5-Feeder | ✅ works — **59.8 fps, 0 stalls** |
 | DuckStation (PS1 emulator) | **D3D12** + DLSS5-Feeder | ⚠️ every call succeeds, output is **black** |
-| Tomb Raider I–III Remastered | OpenGL (64-bit) + Feeder | ❌ `D3D12 fence -> GL semaphore import: FAILED` |
+| Tomb Raider I–III Remastered | OpenGL (64-bit) + Feeder | ❌ GL transport: `D3D12 fence -> GL semaphore import: FAILED` |
+| Tomb Raider I–III Remastered | **OpenGL → Vulkan via Mesa Zink** + Feeder | ✅ **works — 31 fps @ 5120×1440 with the neural pass** |
 | FINAL FANTASY VIII Remastered | OpenGL (32-bit) + Feeder | ❌ same failure, cross-process |
 
-**Conclusion: DLSS 5 works on Linux for Direct3D games, and is blocked for OpenGL games.**
-Confirmed with upstream: Wine cannot import a D3D12 fence *or* resource handle into GL
-(`GL_INVALID_ENUM` on both), so there is no fallback to build. Details below.
+**Conclusion: DLSS 5 works on Linux for Direct3D games — and for OpenGL games too, once you make
+them Vulkan apps.** The Feeder's OpenGL transport is genuinely impossible under Wine (confirmed with
+upstream: neither a D3D12 fence nor resource imports into GL, `GL_INVALID_ENUM` on both). But running
+the game's OpenGL through Mesa's PE-side **Zink** lets the Feeder take its Vulkan transport, where the
+same import succeeds. See [OpenGL games via Zink](#opengl-games-via-zink-gl--vulkan) below.
 
 ---
 
@@ -146,8 +149,52 @@ outright. The native Linux NVIDIA driver implements only the fd-based `GL_EXT_me
 gate cannot detect this. With neither fence nor textures crossing into GL there is nothing for a
 CPU-sync fallback to synchronise, so that approach is off the table.
 
-Remaining theoretical routes: a staging copy, or **Zink** (GL→Vulkan) in front of the game.
+Remaining routes: a staging copy, or **Zink** (GL→Vulkan) in front of the game — **which works**, see below.
 See [issue #121](https://github.com/jlrouzies-fr/DLSS5-Feeder/issues/121).
+
+### OpenGL games via Zink (GL → Vulkan)
+
+The route the Feeder's maintainer named in #121, and it works. Proven on Tomb Raider I–III Remastered
+(x64). At 5120×1440, measured with `WINEDEBUG=fps`:
+
+| | fps |
+|---|---|
+| Zink + ReShade | 132 |
+| + Feeder, plain DLAA (Vulkan transport) | 88 |
+| + **DLSS 5 neural pass** | **31** |
+
+```
+[feed] D3D12 fence -> Vulkan timeline semaphore import: in=OK out=OK
+nr-fwd: CreateFeature(18) => 0x1 (Success)
+```
+
+**The stack** (every piece required):
+
+1. **Mesa for Windows** ([pal1000/mesa-dist-win](https://github.com/pal1000/mesa-dist-win)): its `opengl32.dll`
+   + `libgallium_wgl.dll` beside the exe, `GALLIUM_DRIVER=zink`, `WINEDLLOVERRIDES=opengl32=n,b`. Zink turns the
+   game's GL into Vulkan *inside* the Wine process. `GALLIUM_HUD=fps` is a quick on-screen proof it's active.
+2. **ReShade as a Vulkan layer** — the `opengl32` proxy slot now belongs to Mesa. Wine's builtin `vulkan-1.dll`
+   forwards to the host loader and cannot load Windows-side layers, so put the **genuine Khronos loader** beside
+   the exe with `vulkan-1=n,b`. NuGet `Silk.NET.Vulkan.Loader.Native` (runtimes/win-x64) is the easy source —
+   LunarG's runtime zip ships an empty x64 folder and its installer is a Qt IFW blob. The loader finds the GPU
+   through the `winevulkan.json` ICD Proton already registers.
+3. **Register ReShade as an *implicit* layer in the prefix registry**:
+   `HKLM\Software\Khronos\Vulkan\ImplicitLayers` → `<path to manifest.json>` = `0` (both `/reg:64` and `/reg:32`).
+   **Environment variables don't work here**: Wine processes run elevated, and the Khronos loader then ignores
+   `VK_LAYER_PATH`, `VK_ADD_LAYER_PATH` *and* `VK_INSTANCE_LAYERS` — silently, because its diagnostics don't
+   reach stderr in a GUI process. Debug it with `vulkaninfo.exe` in the same prefix, whose callback does print them.
+4. Feeder 1.17+ `dlss5-feed.addon64` + `addon-dlssnr-linux` in the game folder. The Feeder's in-process
+   `vkCreateDevice` hook adds the interop extensions itself; no fallback layer needed.
+
+**Traps:**
+- ReShade in layer mode may pick `ReShade2.ini` — symlink it to `ReShade.ini`.
+- **VRAM.** The first working run hit 2 fps with the GPU "100%" busy at only ~80 W — PCIe paging, because an
+  idle ComfyUI held ~7.6 GB. Freed (`POST http://127.0.0.1:8188/free {"unload_models":true,"free_memory":true}`),
+  it ran 31 fps at ~190 W. **Low power at 100% utilisation = VRAM starvation**, not compute.
+- ReShade assumes reversed depth; Zink's is standard here (values cluster ~0.98) — set
+  `RESHADE_DEPTH_INPUT_IS_REVERSED=0`.
+- Quality trails a native-DLSS game: motion vectors are optical flow, not engine MVs.
+- `GALLIUM_HUD_DUMP_DIR` writes nothing under Wine; measure with `WINEDEBUG=fps` instead.
 
 ### Depth in emulators
 
