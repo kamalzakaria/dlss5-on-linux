@@ -20,7 +20,7 @@ Proton Experimental, RTX 4070 Ti.
 | DuckStation (PS1 emulator) | **D3D12** + DLSS5-Feeder | ⚠️ every call succeeds, output is **black** |
 | Tomb Raider I–III Remastered | OpenGL (64-bit) + Feeder | ❌ GL transport: `D3D12 fence -> GL semaphore import: FAILED` |
 | Tomb Raider I–III Remastered | **OpenGL → Vulkan via Mesa Zink** + Feeder | ✅ **works — 31 fps @ 5120×1440 with the neural pass** |
-| FINAL FANTASY VIII Remastered | OpenGL (32-bit) + Feeder | ❌ same failure, cross-process |
+| FINAL FANTASY VIII Remastered | OpenGL (32-bit) + Feeder, native GL **and** via Zink | ❌ Zink gets to a DLAA build, then Wine can't import the host64 helper's D3D12 fence (cross-process) |
 
 **Conclusion: DLSS 5 works on Linux for Direct3D games — and for OpenGL games too, once you make
 them Vulkan apps.** The Feeder's OpenGL transport is genuinely impossible under Wine (confirmed with
@@ -195,6 +195,19 @@ nr-fwd: CreateFeature(18) => 0x1 (Success)
   `RESHADE_DEPTH_INPUT_IS_REVERSED=0`.
 - Quality trails a native-DLSS game: motion vectors are optical flow, not engine MVs.
 - `GALLIUM_HUD_DUMP_DIR` writes nothing under Wine; measure with `WINEDEBUG=fps` instead.
+
+**32-bit games: blocked by Wine (FF8 Remastered).** The same stack in x86 (Mesa x86, x86 Khronos loader,
+ReShade32 registered under `HKLM\Software\Wow6432Node\Khronos\Vulkan\ImplicitLayers`, `dlss5-feed.addon32`
++ `host64` helper) gets all the way to `feature ready: 1920x1080 DLAA`, then the game crashes:
+```
+fixme:vulkan:win32u_vkImportSemaphoreWin32HandleKHR d3d12 fence from other process.
+err:vulkan:vkImportSemaphoreWin32HandleKHR Exception 0xc0000005 in Unix call.
+```
+On x64 the D3D12 fence lives in the game process, so the import works. On x86 it comes from the separate
+64-bit helper, and Wine (Proton 11.0-20260917b) doesn't implement cross-process D3D12 fence import. The
+Feeder's `host_creates` ownership flip only covers D3D11 clients. This needs a Wine change, or a Feeder change
+where the game exports the semaphores
+([#121 comment](https://github.com/jlrouzies-fr/DLSS5-Feeder/issues/121#issuecomment-5795634939)).
 
 ### Depth in emulators
 

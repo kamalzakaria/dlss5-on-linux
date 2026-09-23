@@ -85,7 +85,7 @@ on a game that composites 3D characters over pre-rendered art, ambient occlusion
 
 - **DLSS 5** — the OpenGL transport can't work under Wine, but the Zink route works on 64-bit OpenGL games
   (see [README](README.md#opengl-games-via-zink-gl--vulkan)). FF8R is 32-bit, so it would need the same stack in
-  32-bit form plus the Feeder's `host64` helper — untested.
+  32-bit form plus the Feeder's `host64` helper. **Tested and it fails:** the build reaches DLAA, then Wine crashes importing the helper's D3D12 fence from another process ([details](README.md#opengl-games-via-zink-gl--vulkan)).
 - **lsfg-vk frame generation** — it hooks Vulkan; an OpenGL game never presents through Vulkan.
 - **Analog / 360° movement** — the 8-way quantisation lives inside `FFVIII_EFIGS.dll`'s field code,
   so no controller remapping or Steam Input config can help. It needs a Demaster-style binary patch
