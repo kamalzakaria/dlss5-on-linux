@@ -61,10 +61,19 @@ feature 18 (neural rendering) -> 0xBAD0000C (OutOfDate)
 *** unavailable until the driver is updated to 616.56 or newer ***
 ```
 
-No such Linux driver exists (newest upstream: **615.71.09**). RenoDX's add-on and
-DLSS5-Feeder's own neural path both rely on that dispatch and therefore cannot work.
-`addon-dlssnr-linux` sidesteps it by driving the game-local model directly through a
-forwarder DLL whose filename contains `nvngx.dll`. That is the only route that works today.
+On the driver tested here (**595.84**), RenoDX's add-on and DLSS5-Feeder's own neural path
+both rely on that dispatch and therefore cannot work. `addon-dlssnr-linux` sidesteps it by
+driving the game-local model directly through a forwarder DLL whose filename contains
+`nvngx.dll`. That is the only route that works on 595.
+
+> **Correction (2026-09-26).** An earlier version of this README said "no such Linux driver
+> exists (newest upstream: 615.71.09)". That compared a **Windows** version number with a
+> Linux one. The two branches are numbered separately: NVIDIA's release notes pair
+> [**615.71.09 (Linux) / 616.92 (Windows)**](https://docs.nvidia.com/datacenter/tesla/tesla-release-notes-615-71-09/index.html),
+> and 616.92 is past the 616.56 the message asks for. So current Linux drivers may already
+> dispatch feature 18. **Untested:** 595 was the newest driver in this distro's repository,
+> and NVIDIA's notes don't mention NGX or DLSS, so Linux could still lag. If you run 615+,
+> check `dlss5-feed-host.log` (or `ReShade.log`) for the feature-18 line and report it.
 
 ---
 
